@@ -60,7 +60,14 @@ async def test_history_is_trimmed_and_starts_with_user(repository: ProductReposi
 async def test_stream_emits_sources_tokens_done(repository: ProductRepository) -> None:
     service = ChatService(repository, RecordingLLM())
     events = [e async for e in service.stream(ChatRequest(messages=_msgs(("user", "jeans"))))]
-    assert [e.event for e in events] == ["filters", "sources", "token", "token", "done"]
+    assert [e.event for e in events] == [
+        "filters",
+        "sources",
+        "token",
+        "token",
+        "recommended",
+        "done",
+    ]
 
 
 async def test_price_in_message_is_enforced(repository: ProductRepository) -> None:
@@ -92,3 +99,14 @@ def test_later_turn_overrides_earlier_constraint(repository: ProductRepository) 
     service = ChatService(repository, RecordingLLM())
     msgs = _msgs(("user", "under 1000"), ("assistant", "..."), ("user", "actually under 2000"))
     assert service.resolve_filters(ChatRequest(messages=msgs)).max_price == 2000
+
+
+def test_find_recommended_orders_by_mention_and_accepts_variant_skus(
+    repository: ProductRepository,
+) -> None:
+    sources = repository.search("jeans", k=5)
+    answer = "Try SKU-2 first. Or the bomber (size M: SKU-4). Ignore everything else."
+    picked = ChatService.find_recommended(answer, [s for s in sources if s.product.sku != "SKU-4"])
+    assert picked == ["SKU-2"]
+    assert ChatService.find_recommended(answer, sources)[:2] == ["SKU-2", "SKU-4"]
+    assert ChatService.find_recommended("No matches, sorry.", sources) == []

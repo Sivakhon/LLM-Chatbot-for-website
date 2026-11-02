@@ -65,6 +65,19 @@ def test_chat(client: TestClient) -> None:
     assert body["sources"][0]["product"]["sku"] == "SKU-4"
 
 
+def test_chat_returns_only_cited_products_as_recommended(client: TestClient) -> None:
+    msg = {"role": "user", "content": "ขอดูเสื้อผู้ชายราคาไม่เกิน 2000"}
+    body = client.post("/api/v1/chat", json={"messages": [msg]}).json()
+    assert body["applied_filters"] == {
+        "gender": "men",
+        "product_types": ["tops"],
+        "min_price": None,
+        "max_price": 2000,
+    }
+    assert [s["product"]["sku"] for s in body["sources"]] == ["SKU-4"]
+    assert body["recommended_skus"] == ["SKU-4"]
+
+
 def test_chat_enforces_price_from_message(client: TestClient) -> None:
     msg = {"role": "user", "content": "ขอดูของราคาไม่เกิน 1000 หน่อย"}
     body = client.post("/api/v1/chat", json={"messages": [msg]}).json()
@@ -82,9 +95,11 @@ def test_chat_stream_sse(client: TestClient) -> None:
         (block.split("\n")[0].removeprefix("event: "), json.loads(block.split("\n")[1][6:]))
         for block in raw.strip().split("\n\n")
     ]
-    assert events[0] == ("filters", {"gender": "women"})
+    assert events[0] == ("filters", {"gender": "women", "product_types": ["bottoms"]})
     assert events[1][0] == "sources"
     assert {s["product"]["gender"] for s in events[1][1]} <= {"women", "unisex"}
+    assert events[-2][0] == "recommended"
+    assert set(events[-2][1]) <= {s["product"]["sku"] for s in events[1][1]}
     assert events[-1] == ("done", {"model": "fake-extractive"})
     answer = "".join(data for name, data in events if name == "token")
     assert answer.startswith("Here are some products")

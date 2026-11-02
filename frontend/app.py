@@ -24,6 +24,8 @@ def get_client() -> ShopBotClient:
 
 def render_filters(applied: dict[str, Any]) -> None:
     parts = []
+    if applied.get("product_types"):
+        parts.append(" / ".join(applied["product_types"]))
     if applied.get("gender"):
         parts.append(f"for {applied['gender']}")
     if applied.get("min_price") is not None:
@@ -34,23 +36,27 @@ def render_filters(applied: dict[str, Any]) -> None:
         st.caption("🎯 Filters applied: " + " · ".join(parts))
 
 
-def render_products(sources: list[dict[str, Any]]) -> None:
-    if not sources:
+def pick_recommended(sources: list[dict[str, Any]], skus: list[str]) -> list[dict[str, Any]]:
+    """Keep only the products the answer recommends, in the order it mentions them."""
+    by_sku = {item["product"]["sku"]: item["product"] for item in sources}
+    return [by_sku[sku] for sku in skus if sku in by_sku]
+
+
+def render_products(products: list[dict[str, Any]]) -> None:
+    if not products:
         return
-    with st.expander(f"🔎 {len(sources)} products used to answer", expanded=False):
-        cols = st.columns(min(len(sources), 3))
-        for i, item in enumerate(sources):
-            p = item["product"]
-            with cols[i % len(cols)]:
-                if p.get("image_url"):
-                    st.image(p["image_url"], width="stretch")
-                st.markdown(f"**{p['name']}**")
-                price = f"฿{p['price']:,.0f}"
-                if p["discount_percent"]:
-                    price += f" ~~฿{p['original_price']:,.0f}~~ `-{p['discount_percent']}%`"
-                st.markdown(price)
-                sizes = ", ".join(s["size"] for s in p["sizes"]) or "—"
-                st.caption(f"SKU {p['sku']} · sizes: {sizes} · relevance {item['score']:.2f}")
+    cols = st.columns(min(len(products), 3))
+    for i, p in enumerate(products):
+        with cols[i % len(cols)], st.container(border=True):
+            if p.get("image_url"):
+                st.image(p["image_url"], width="stretch")
+            st.markdown(f"**{p['name']}**")
+            price = f"฿{p['price']:,.0f}"
+            if p["discount_percent"]:
+                price += f" ~~฿{p['original_price']:,.0f}~~ `-{p['discount_percent']}%`"
+            st.markdown(price)
+            sizes = ", ".join(s["size"] for s in p["sizes"]) or "—"
+            st.caption(f"SKU {p['sku']} · sizes: {sizes}")
 
 
 # --- Sidebar ---------------------------------------------------------------
@@ -69,8 +75,8 @@ with st.sidebar:
         st.error(f"API unreachable at {API_URL}")
 
     st.caption(
-        "💡 Just ask naturally: price and gender are understood from your message, "
-        "e.g. *ไม่เกิน 1000 บาท*, *for men under 1,500*."
+        "💡 Just ask naturally: product type, price and gender are understood from your "
+        "message, e.g. *เสื้อผู้ชายไม่เกิน 1000 บาท*, *women's jeans under 1,500*."
     )
     if st.button("🗑️ Clear chat", width="stretch"):
         st.session_state.messages = []
@@ -86,7 +92,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         render_filters(msg.get("filters", {}))
-        render_products(msg.get("sources", []))
+        render_products(msg.get("products", []))
 
 if prompt := st.chat_input("Ask about products, sizes, prices…"):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -96,6 +102,7 @@ if prompt := st.chat_input("Ask about products, sizes, prices…"):
     history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
     sources: list[dict[str, Any]] = []
     applied: dict[str, Any] = {}
+    recommended: list[str] = []
     errors: list[str] = []
 
     def token_stream() -> Iterator[str]:
@@ -106,6 +113,8 @@ if prompt := st.chat_input("Ask about products, sizes, prices…"):
                 sources.extend(ev.data)
             elif ev.event == "token":
                 yield ev.data
+            elif ev.event == "recommended":
+                recommended.extend(ev.data)
             elif ev.event == "error":
                 errors.append(ev.data.get("message", "Unknown error"))
 
@@ -117,10 +126,11 @@ if prompt := st.chat_input("Ask about products, sizes, prices…"):
             errors.append(f"Could not reach the API: {exc}")
         for err in errors:
             st.error(err)
+        products = pick_recommended(sources, recommended)
         render_filters(applied)
-        render_products(sources)
+        render_products(products)
 
     if answer and not errors:
         st.session_state.messages.append(
-            {"role": "assistant", "content": answer, "sources": sources, "filters": applied}
+            {"role": "assistant", "content": answer, "products": products, "filters": applied}
         )

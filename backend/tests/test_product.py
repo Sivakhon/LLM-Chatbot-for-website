@@ -1,6 +1,6 @@
 import pytest
 
-from app.domain.product import Product, infer_gender, parse_price
+from app.domain.product import Product, infer_gender, infer_product_type, parse_price
 
 LEGACY = {
     "product-name": "Jacket Bomber Men Black",
@@ -69,3 +69,32 @@ def test_whole_legacy_dataset_loads() -> None:
     products = load_products(path)
     assert len(products) == 105
     assert all(p.price <= p.original_price for p in products)
+
+
+@pytest.mark.parametrize(
+    ("cats", "name", "expected"),
+    [
+        (["Men", "Men Clothing", "Men T-Shirts"], "", "tops"),
+        (["Men", "Men Jackets & Coats"], "", "tops"),
+        (["Women", "Women Cargo Shorts"], "", "bottoms"),
+        (["Men", "Men Jeans Pants"], "", "bottoms"),
+        (["Men", "Men Flip-Flops"], "", "footwear"),
+        (["Men", "Men Sneakers"], "", "footwear"),
+        (["Men", "Men Hats & Caps"], "", "accessories"),
+        (["Men", "Men Cross Body Bags"], "", "accessories"),
+        ([], "sandals Grey M09Z00543", "footwear"),
+        ([], "Mystery item", None),
+    ],
+)
+def test_infer_product_type(cats: list[str], name: str, expected: str | None) -> None:
+    assert infer_product_type(cats, name) == expected
+
+
+def test_every_real_product_gets_a_type() -> None:
+    from pathlib import Path
+
+    from app.ingest import load_products
+
+    path = Path(__file__).parents[2] / "data" / "raw" / "mc_jeans_products.json"
+    untyped = [p.name for p in load_products(path) if p.product_type is None]
+    assert untyped == []

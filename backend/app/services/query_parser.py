@@ -72,7 +72,7 @@ def _to_number(raw: str) -> float:
 
 def extract_filters(text: str) -> ProductFilters:
     """Best-effort parse of one message. Unrecognised text yields empty filters."""
-    found: dict[str, float | str | list[str]] = {}
+    found: dict[str, object] = {}
 
     if _PRICE_CONTEXT.search(text) and (m := _RANGE.search(text)):
         low, high = sorted((_to_number(m[1]), _to_number(m[2])))

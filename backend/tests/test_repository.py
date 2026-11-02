@@ -6,6 +6,9 @@ def test_build_where() -> None:
     assert build_where(None) is None
     assert build_where(ProductFilters()) is None
     assert build_where(ProductFilters(max_price=1000)) == {"price": {"$lte": 1000}}
+    assert build_where(ProductFilters(product_types=["tops", "footwear"])) == {
+        "product_type": {"$in": ["tops", "footwear"]}
+    }
     assert build_where(ProductFilters(gender="men", min_price=500)) == {
         "$and": [{"gender": {"$in": ["men", "unisex"]}}, {"price": {"$gte": 500}}]
     }
