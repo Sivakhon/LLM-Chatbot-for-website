@@ -1,0 +1,58 @@
+name: shopbot
+
+services:
+  chroma:
+    image: chromadb/chroma:1.5.9  # keep in lockstep with the chromadb client version
+    volumes:
+      - chroma-data:/data
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8000'"]
+      interval: 5s
+      retries: 20
+
+  # One-off job: (re)builds the vector index, then exits.
+  ingest:
+    image: shopbot-api:local
+    build: ./backend
+    command: ["python", "-m", "app.ingest", "/data/raw/mc_jeans_products.json", "--reset"]
+    env_file: [{ path: .env, required: false }]
+    environment: &chroma-env
+      CHROMA_MODE: http
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      chroma: { condition: service_healthy }
+
+  api:
+    image: shopbot-api:local
+    build: ./backend
+    env_file: [{ path: .env, required: false }]
+    environment:
+      <<: *chroma-env
+      LOG_JSON: "true"
+      CORS_ORIGINS: '["http://localhost:8501"]'
+    ports:
+      - "8000:8000"
+    depends_on:
+      chroma: { condition: service_healthy }
+      ingest: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  ui:
+    build: ./frontend
+    environment:
+      SHOPBOT_API_URL: http://api:8000
+      SHOPBOT_API_KEY: ${API_KEY:-}
+    ports:
+      - "8501:8501"
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  chroma-data:
